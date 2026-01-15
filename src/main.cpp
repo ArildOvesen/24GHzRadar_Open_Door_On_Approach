@@ -668,6 +668,17 @@ bool postDebugToWebhook(const String& jsonPayload) {
   return (code > 0 && code < 400);
 }
 
+static void jsonAppendEscaped(String &out, const String &s) {
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '\\') out += "\\\\";
+    else if (c == '"') out += "\\\"";
+    else if (c == '\n') out += "\\n";
+    else out += c;
+  }
+}
+
+
 String buildDebugPayload(uint32_t now) {
   // Payload shape:
   // - "value", a short one-line key=value string (easy to glance at)
@@ -750,25 +761,61 @@ String buildDebugPayload(uint32_t now) {
 
   // JSON escape "value" and "message".
   // This avoids pulling in a JSON library, keeps dependencies minimal.
+    // ---- Structured JSON payload ----
   String json;
-  json.reserve(1300);
-  json += "{\"value\":\"";
-  for (size_t i = 0; i < value.length(); i++) {
-    char c = value[i];
-    if (c == '\\') json += "\\\\";
-    else if (c == '"') json += "\\\"";
-    else json += c;
+  json.reserve(1700);
+  json += "{";
+
+  // Machine-readable fields
+  json += "\"dbg\":true";
+
+  json += ",\"state\":\"";
+  jsonAppendEscaped(json, String(stateName(st)));
+  json += "\"";
+
+  json += ",\"cmRaw\":";       json += dbg.cmRawLast;
+  json += ",\"cmFilt\":";      json += dbg.cmFiltLast;
+
+  // Keep decimals for velocities
+  json += ",\"v\":";           json += String(dbg.vLast, 2);
+  json += ",\"vFast\":";       json += String(dbg.vFastLast, 2);
+
+  json += ",\"score\":";       json += dbg.scoreLast;
+  json += ",\"fp\":";          json += dbg.fpCntLast;
+  json += ",\"trig\":";        json += dbg.triggers;
+
+  json += ",\"sent\":";        json += dbg.openSent;
+  json += ",\"st\":";          json += dbg.openGotStatus;
+  json += ",\"ok\":";          json += dbg.opensOk;
+  json += ",\"fail\":";        json += dbg.opensFail;
+  json += ",\"codeLast\":";    json += dbg.codeLast;
+  json += ",\"openMsLast\":";  json += dbg.openMsLast;
+
+  // Timing / context
+  json += ",\"uptime_s\":";    json += (now / 1000);
+
+  bool wifiOk = (WiFi.status() == WL_CONNECTED);
+  json += ",\"wifi\":\"";      json += (wifiOk ? "OK" : "DOWN"); json += "\"";
+  if (wifiOk) {
+    json += ",\"rssi\":";      json += WiFi.RSSI();
+    json += ",\"ip\":\"";      json += WiFi.localIP().toString(); json += "\"";
+  } else {
+    json += ",\"rssi\":0";
+    json += ",\"ip\":\"\"";
   }
-  json += "\",\"message\":\"";
-  for (size_t i = 0; i < msg.length(); i++) {
-    char c = msg[i];
-    if (c == '\\') json += "\\\\";
-    else if (c == '"') json += "\\\"";
-    else if (c == '\n') json += "\\n";
-    else json += c;
-  }
-  json += "\"}";
+
+  // Keep your existing human-friendly strings too
+  json += ",\"value\":\"";
+  jsonAppendEscaped(json, value);
+  json += "\"";
+
+  json += ",\"message\":\"";
+  jsonAppendEscaped(json, msg);
+  json += "\"";
+
+  json += "}";
   return json;
+
 }
 
 // =========================
